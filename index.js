@@ -4,12 +4,15 @@ const express = require("express");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const app = express();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const port = process.env.PORT || 3000;
 
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: [
+      "http://localhost:5173",
+      "https://advance-healthcare-sd246.web.app",
+    ],
     credentials: true,
   })
 );
@@ -41,9 +44,11 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("AdvanceHealthService");
     const userCollection = db.collection("users");
+    const doctorCollection = db.collection("doctors");
+    const appointmentCollection = db.collection("appointments");
 
     app.post("/jwt", (req, res) => {
       const user = req.body;
@@ -67,14 +72,102 @@ async function run() {
         .send({ success: true });
     });
 
-    app.get("/users", verifyToken, async (req, res) => {
-      const email = req.query.email;
-      const users = userCollection.find();
-      if (email != req.decodedUser.email) {
-        return res.status(403).send({ message: "forbidden  access" });
+    app.get("/users", async (req, res) => {
+      try {
+        const users = userCollection.find();
+        const collections = await users.toArray();
+        res.send(collections);
+      } catch (error) {
+        res.status(201).send("internal server error!");
       }
-      const collections = await users.toArray();
-      res.send(collections);
+    });
+
+    app.post("/user", async (req, res) => {
+      try {
+        const { displayName, email } = req.body;
+        const newUser = { displayName, email, role: "user" };
+        if (!email || !displayName) {
+          return res
+            .status(400)
+            .send({ message: "Email and Display Name are required." });
+        }
+        const existingUser = await userCollection.findOne({ email });
+        if (existingUser) {
+          return res
+            .status(201)
+            .send({ message: "User already exists with this email." });
+        }
+        const result = await userCollection.insertOne(newUser);
+        res.status(201).send(result);
+      } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+      }
+    });
+
+    //doctors api request
+    app.get("/doctors", async (req, res) => {
+      try {
+        const doctors = doctorCollection.find();
+        const result = await doctors.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+      }
+    });
+
+    app.get("/doctor/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const query = { _id: new ObjectId(id) };
+        const doctor = await doctorCollection.findOne(query);
+
+        if (!doctor) {
+          return res.status(404).json({ message: "Doctor not found" });
+        }
+
+        res.json(doctor);
+      } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+      }
+    });
+
+    app.get("/doctors/:specialty", async (req, res) => {
+      try {
+        const { specialty } = req.params;
+        const doctors = doctorCollection.find({ specialty });
+        const result = await doctors.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+      }
+    });
+
+    //Appointment api requests
+
+    app.get("/appointments/:email", verifyToken, async (req, res) => {
+      try {
+        const { email } = req.params;
+        const query = { email };
+        if (!req.decodedUser) {
+          return res.status(401).send("UnAuthorize access");
+        }
+        const appointments = await appointmentCollection.find(query).toArray();
+        res.send(appointments);
+      } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
+      }
+    });
+
+    app.post("/appointment", async (req, res) => {
+      try {
+        const appointment = req.body;
+        const result = await appointmentCollection.insertOne(appointment);
+        res.status(201).send(result);
+      } catch (error) {
+        res
+          .status(500)
+          .send("Having error in posting appointment", error.message);
+      }
     });
 
     console.log("Connected to MongoDB successfully!");
